@@ -1,0 +1,5 @@
+# English strings go here for Rails i18n
+ru:
+  # my_label: "My label"
+  label_check_settings : "Проверка для подзадач с учетом смены даты начала?"
+  label_check_subtask : "Проверять все подзадачи (да) или только у тех где менялась дата начала (нет)"
