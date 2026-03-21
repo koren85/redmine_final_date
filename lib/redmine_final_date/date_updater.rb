@@ -38,8 +38,10 @@ module RedmineFinalDate
         # Split: top-level issues vs subtasks
         top_level, subtasks = issues.partition { |i| i.parent_id.nil? }
 
-        # Top-level issues: update in-place, comment on themselves
-        top_level.each do |issue|
+        # Exclude top-level issues that are parents of subtasks already in the filter
+        # — they will be updated by process_parent_group to avoid duplicate journal entries
+        subtask_parent_ids = subtasks.map(&:parent_id).to_set
+        top_level.reject { |i| subtask_parent_ids.include?(i.id) }.each do |issue|
           merge_results(results, process_standalone(issue))
         end
 
@@ -130,8 +132,10 @@ module RedmineFinalDate
       label ||= issue.id.to_s
       cf_id_str = @settings['custom_field_id'].to_s
 
+      resolved_notes = notes.to_s.gsub('{{date}}', new_date.strftime('%d.%m.%Y'))
+
       # init_journal must be called before custom_field_values= and before save
-      issue.init_journal(acting_user, notes)
+      issue.init_journal(acting_user, resolved_notes)
       issue.custom_field_values = { cf_id_str => new_date.to_s }
 
       if issue.save

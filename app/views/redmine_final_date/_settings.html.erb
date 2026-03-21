@@ -71,6 +71,7 @@
   <label for="settings_comment_text"><%= l(:label_comment_text) %>:</label><br/>
   <%= text_area_tag 'settings[comment_text]', @settings['comment_text'],
         id: 'settings_comment_text', rows: 3, cols: 60 %>
+  <em class="info"><%= l(:hint_comment_text) %></em>
 </p>
 
 <%# --- acting_user_id --------------------------------------------- %>

@@ -12,6 +12,7 @@ en:
   hint_date_days: "Integer; used for 'add to field' and 'add to today' modes"
   label_date_fixed: "Fixed date (YYYY-MM-DD)"
   label_comment_text: "Journal comment text"
+  hint_comment_text: "Use {{date}} to insert the new final date into the comment text"
   label_acting_user_id: "Acting user (global)"
   hint_acting_user_id: "User who performs updates. Leave blank to use per-issue responsible field. Falls back to first active admin."
   label_responsible_field_id: "Responsible user field (fallback)"
