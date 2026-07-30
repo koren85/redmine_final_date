@@ -1,105 +1,81 @@
-class IncludeJavascriptsHook < Redmine::Hook::ViewListener
-  include ActionView::Helpers::TagHelper
+module RedmineFinalDate
+  # The final date is owned by the parent issue, so it must not be editable —
+  # nor even visible — on a subtask. Redmine offers no server-side way to hide a
+  # single custom field for a subset of issues, so the field is removed from the
+  # DOM client-side.
+  class IncludeJavascriptsHook < Redmine::Hook::ViewListener
+    # Hide the field on the issue edit/new form.
+    def view_issues_form_details_bottom(context = {})
+      custom_field_id = hidden_custom_field_id(context[:issue])
+      return '' if custom_field_id.nil?
 
-  def view_issues_form_details_bottom(context = {})
-    issue = context[:issue]
-    custom_field_id = Setting.plugin_redmine_final_date['custom_field_id'].to_i
+      javascript_tag <<~JS
+        (function() {
+          var fieldId = "issue_custom_field_values_#{custom_field_id}";
 
-    if issue.parent.present? && issue.available_custom_fields.include?(CustomField.find(custom_field_id))
+          function removeCustomField() {
+            var element = document.getElementById(fieldId);
+            if (!element) { return; }
+            var row = element.closest("p");
+            if (row && row.parentNode) { row.parentNode.removeChild(row); }
+          }
 
-=begin
-    javascript_tag <<-JS
-            document.addEventListener("DOMContentLoaded", function() {
-              var customField = document.querySelector("#issue_custom_field_values_#{custom_field_id}");
-              if (customField) {
-                customField.closest("div").style.display = "none";
+          function start() {
+            removeCustomField();
+            // Redmine re-renders the form over AJAX (tracker/project change),
+            // which brings the field back — so keep removing it.
+            new MutationObserver(removeCustomField).observe(
+              document.body, { childList: true, subtree: true }
+            );
+          }
 
-              }
-            });
-    JS
-=end
-
-      javascript_tag <<-JS
-// Функция для удаления элемента
-function removeCustomField() {
-  var element = document.getElementById("issue_custom_field_values_#{custom_field_id}");
-  if (element) {
-    var parent = element.parentNode;
-    if (parent.tagName === "P") {
-      parent.parentNode.removeChild(parent);
-    }
-  }
-}
-
-// Обработчик события DOMContentLoaded для выполнения кода после загрузки страницы
-document.addEventListener("DOMContentLoaded", function() {
-  // Удалить элемент при загрузке страницы
-  removeCustomField();
-
-  // Удалить элемент при каждом обновлении содержимого страницы
-  var observer = new MutationObserver(function(mutationsList) {
-    for (var mutation of mutationsList) {
-      if (mutation.type === "childList") {
-        removeCustomField();
-      }
-    }
-  });
-
-  var targetNode = document.body;
-
-  // Наблюдение за изменениями в содержимом targetNode
-  var config = { childList: true, subtree: true };
-  observer.observe(targetNode, config);
-});
-
-      JS
-
-      # javascript_tag("var myValue = #{value.to_json};") if value.present?
-    end
-  end
-
-  def view_issues_show_details_bottom(context = {})
-    issue = context[:issue]
-    custom_field_id = Setting.plugin_redmine_final_date['custom_field_id'].to_i
-    if issue.parent.present? && issue.available_custom_fields.include?(CustomField.find(custom_field_id))
-
-      javascript_tag <<-JS
-            document.addEventListener("DOMContentLoaded", function() {
-              var customField = document.querySelector(".cf_#{custom_field_id}.attribute");
-              if (customField) {
-                customField.closest("div").style.display = "none";
-              }
-            });
+          if (document.readyState === "loading") {
+            document.addEventListener("DOMContentLoaded", start);
+          } else {
+            start();
+          }
+        })();
       JS
     end
 
-  end
+    # Hide the field on the issue show page.
+    def view_issues_show_details_bottom(context = {})
+      custom_field_id = hidden_custom_field_id(context[:issue])
+      return '' if custom_field_id.nil?
 
-=begin
-  def controller_issues_edit_before_save(context={})
-    issue = context[:issue]
-    custom_field_id = Setting.plugin_redmine_final_date['custom_field_id'].to_i
-    # Проверяем, что это подзадача и она имеет дату начала
-    if issue.is_a?(Issue) && issue.start_date.present? && issue.parent_id.present?
-      parent = Issue.find_by_id(issue.parent_id)
+      javascript_tag <<~JS
+        (function() {
+          function hideCustomField() {
+            var attribute = document.querySelector(".cf_#{custom_field_id}.attribute");
+            if (attribute) { attribute.style.display = "none"; }
+          }
 
-      # Проверяем, что существует родительская задача и она имеет кастомное поле с ID 81
-      if parent.present? && parent.custom_field_value(custom_field_id).present?
-        custom_field_value = parent.custom_field_value(custom_field_id).to_date
-
-        # Проверяем, что дата начала подзадачи больше, чем значение кастомного поля
-        if issue.start_date > custom_field_value
-          return issue.errors.add(:start_date, "Дата начала должна быть меньше или равна значению кастомного поля")
-           false
-        end
-      end
+          if (document.readyState === "loading") {
+            document.addEventListener("DOMContentLoaded", hideCustomField);
+          } else {
+            hideCustomField();
+          }
+        })();
+      JS
     end
 
-    true
+    private
+
+    # Returns the id of the custom field to hide, or nil when the issue owns its
+    # final date, the plugin is unconfigured, or the configured field was deleted
+    # or is not available on this issue.
+    #
+    # Anything with a parent gets the field hidden, at any depth — only the
+    # top-level issue of a branch owns the final date. A mid-level issue with
+    # children of its own is not an owner either.
+    def hidden_custom_field_id(issue)
+      return nil if issue.nil? || issue.parent_id.blank?
+
+      custom_field = RedmineFinalDate::Settings.custom_field
+      return nil if custom_field.nil?
+      return nil unless issue.available_custom_fields.include?(custom_field)
+
+      custom_field.id
+    end
   end
-=end
-
-
-
-
 end

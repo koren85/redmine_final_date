@@ -1,9 +1,13 @@
-.blue {
-    color: blue;
+/* Parent final date shown at the bottom of a subtask page (RedmineFinalDate::Hooks).
+   Prefixed to avoid clashing with Redmine core or other plugins — this file is
+   loaded on every page. */
+
+.rfd-date-past {
+    color: red;
     font-weight: bold;
 }
 
-.red {
-    color: red;
+.rfd-date-future {
+    color: blue;
     font-weight: bold;
 }

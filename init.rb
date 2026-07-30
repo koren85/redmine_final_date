@@ -8,7 +8,7 @@ Redmine::Plugin.register :redmine_final_date do
 
   settings partial: 'redmine_final_date/settings', default: {
     'custom_field_id'      => '',
-    'check_subtask'        => '',
+    'check_subtask'        => '0',
     'filter_id'            => '',
     'date_mode'            => 'add_to_today',
     'date_days'            => '0',

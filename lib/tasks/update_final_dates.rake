@@ -4,5 +4,13 @@ namespace :redmine do
     task update_dates: :environment do
       RedmineFinalDate::DateUpdater.new.run
     end
+
+    desc "Repair: force every subtask's final date to match its top-level issue. " \
+         "Dry-run unless APPLY=1. Writes silently — no journals, no notifications."
+    task sync_subtasks: :environment do
+      apply = ENV['APPLY'].to_s == '1'
+      puts apply ? '*** APPLY MODE — changes will be written ***' : '*** DRY RUN — nothing will be written (pass APPLY=1 to write) ***'
+      RedmineFinalDate::SubtaskSync.new.run(apply: apply)
+    end
   end
 end

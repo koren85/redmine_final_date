@@ -1,15 +1,26 @@
+<%# Redmine hands us @settings — the raw stored hash, which lacks every key added
+    since the admin last pressed Save. Read through the plugin's accessor instead
+    so the form is pre-filled with the registered defaults. %>
+<% settings = RedmineFinalDate::Settings.all %>
+
 <h3><%= l(:label_settings) %></h3>
 <p>
-  <label for="custom_field_id"><%= l(:label_custom_field) %>:</label>
-<!-- <%#= select_tag 'settings[custom_field_id]', options_from_collection_for_select(CustomField.all, 'id', 'name', @settings['custom_field_id'].to_i) %>-->
-  <%= select_tag 'settings[custom_field_id]', options_from_collection_for_select(CustomField.where(field_format: 'date'), 'id', 'name', @settings['custom_field_id'].to_i) %>
-
+  <label for="settings_custom_field_id"><%= l(:label_custom_field) %>:</label>
+  <%= select_tag 'settings[custom_field_id]',
+        options_from_collection_for_select(CustomField.where(field_format: 'date').order(:name),
+                                           'id', 'name', settings['custom_field_id'].to_i),
+        include_blank: true,
+        id: 'settings_custom_field_id' %>
 </p>
 
 <p>
-<label for="check_subtask"><%= l(:label_check_subtask) %>:</label>
-<%= check_box_tag 'settings[check_subtask]', '1', @settings['check_subtask'] %>
-
+  <label for="settings_check_subtask"><%= l(:label_check_subtask) %>:</label>
+  <%# check_box_tag has no companion hidden field, so an unchecked box would post
+      nothing at all and the key would silently vanish from the settings hash. %>
+  <%= hidden_field_tag 'settings[check_subtask]', '0', id: nil %>
+  <%= check_box_tag 'settings[check_subtask]', '1',
+        RedmineFinalDate::Settings.truthy?(settings['check_subtask']),
+        id: 'settings_check_subtask' %>
 </p>
 
 <%# ================================================================ %>
@@ -25,7 +36,7 @@
     query_options = IssueQuery.order(:name).map { |q| [q.name, q.id] }
   %>
   <%= select_tag 'settings[filter_id]',
-        options_for_select(query_options, @settings['filter_id'].to_i),
+        options_for_select(query_options, settings['filter_id'].to_i),
         include_blank: true,
         class: 'rfd-select2',
         id: 'settings_filter_id' %>
@@ -47,14 +58,14 @@
     ]
   %>
   <%= select_tag 'settings[date_mode]',
-        options_for_select(date_mode_options, @settings['date_mode']),
+        options_for_select(date_mode_options, settings['date_mode']),
         id: 'settings_date_mode' %>
 </p>
 
 <%# --- date_days (visible for add_to_today / add_to_field) -------- %>
 <p id="rfd_date_days_row">
   <label for="settings_date_days"><%= l(:label_date_days) %>:</label>
-  <%= text_field_tag 'settings[date_days]', @settings['date_days'],
+  <%= text_field_tag 'settings[date_days]', settings['date_days'],
         id: 'settings_date_days', size: 6 %>
   <em class="info"><%= l(:hint_date_days) %></em>
 </p>
@@ -62,14 +73,14 @@
 <%# --- date_fixed (visible only for set_fixed) ------------------- %>
 <p id="rfd_date_fixed_row" style="display:none;">
   <label for="settings_date_fixed"><%= l(:label_date_fixed) %>:</label>
-  <%= text_field_tag 'settings[date_fixed]', @settings['date_fixed'],
+  <%= text_field_tag 'settings[date_fixed]', settings['date_fixed'],
         id: 'settings_date_fixed', size: 12, placeholder: 'YYYY-MM-DD' %>
 </p>
 
 <%# --- comment_text ----------------------------------------------- %>
 <p>
   <label for="settings_comment_text"><%= l(:label_comment_text) %>:</label><br/>
-  <%= text_area_tag 'settings[comment_text]', @settings['comment_text'],
+  <%= text_area_tag 'settings[comment_text]', settings['comment_text'],
         id: 'settings_comment_text', rows: 3, cols: 60 %>
   <em class="info"><%= l(:hint_comment_text) %></em>
 </p>
@@ -81,7 +92,7 @@
     user_options = User.active.sorted.map { |u| [u.name, u.id] }
   %>
   <%= select_tag 'settings[acting_user_id]',
-        options_for_select(user_options, @settings['acting_user_id'].to_i),
+        options_for_select(user_options, settings['acting_user_id'].to_i),
         include_blank: true,
         class: 'rfd-select2',
         id: 'settings_acting_user_id' %>
@@ -95,7 +106,7 @@
     user_field_options = CustomField.where(type: 'IssueCustomField', field_format: 'user').order(:name).map { |f| [f.name, f.id] }
   %>
   <%= select_tag 'settings[responsible_field_id]',
-        options_for_select(user_field_options, @settings['responsible_field_id'].to_i),
+        options_for_select(user_field_options, settings['responsible_field_id'].to_i),
         include_blank: true,
         class: 'rfd-select2',
         id: 'settings_responsible_field_id' %>
@@ -105,14 +116,14 @@
 <%# --- cron_schedule ---------------------------------------------- %>
 <p>
   <label for="settings_cron_schedule"><%= l(:label_cron_schedule) %>:</label><br/>
-  <%= text_field_tag 'settings[cron_schedule]', @settings['cron_schedule'],
+  <%= text_field_tag 'settings[cron_schedule]', settings['cron_schedule'],
         id: 'settings_cron_schedule', size: 25, placeholder: '0 16 * * 1-5' %>
 </p>
 
 <p>
   <strong><%= l(:label_cron_command) %>:</strong><br/>
   <code style="display:block;background:#f4f4f4;padding:8px;margin-top:4px;font-size:12px;word-break:break-all;">
-    <%= h(@settings['cron_schedule'].presence || '0 16 * * 1-5') %>
+    <%= h(settings['cron_schedule'].presence || '0 16 * * 1-5') %>
     &nbsp;cd <%= h(Rails.root.to_s) %> &amp;&amp; RAILS_ENV=<%= h(Rails.env) %> bundle exec rake redmine:final_date:update_dates &gt;&gt; /var/log/redmine_final_date.log 2&gt;&amp;1
   </code>
 </p>
@@ -121,14 +132,20 @@
 <%# Select2 + toggle JS                                              %>
 <%# ================================================================ %>
 
-<%= javascript_include_tag 'select2/select2.js', plugin: 'a_common_libs' %>
-<%= stylesheet_link_tag 'select2', plugin: 'a_common_libs' %>
+<%# Select2 lives in a separate plugin. Load it only when that plugin is actually
+    installed, otherwise the asset URLs 404 and the whole script block below dies. %>
+<% if Redmine::Plugin.installed?(:a_common_libs) %>
+  <%= javascript_include_tag 'select2/select2.js', plugin: 'a_common_libs' %>
+  <%= stylesheet_link_tag 'select2', plugin: 'a_common_libs' %>
+<% end %>
 
 <script type="text/javascript">
 (function($) {
   $(document).ready(function() {
-    // Initialise Select2 on all plugin dropdowns
-    $('.rfd-select2').select2({ width: '300px' });
+    // Initialise Select2 on all plugin dropdowns — plain selects if unavailable.
+    if ($.fn.select2) {
+      $('.rfd-select2').select2({ width: '300px' });
+    }
 
     // Show/hide date_days vs date_fixed based on selected mode
     function rfdToggleDateFields() {
@@ -145,12 +162,15 @@
     rfdToggleDateFields();
     $('#settings_date_mode').on('change', rfdToggleDateFields);
 
-    // Update edit-filter link when query selection changes
+    // Update edit-filter link when query selection changes.
+    // Built from a server-rendered template so it honours relative_url_root.
+    var rfdQueryEditUrl = <%= raw edit_query_path(:id => '__RFD_ID__').to_json %>;
+
     function rfdUpdateFilterLink() {
       var id  = $('#settings_filter_id').val();
       var $a  = $('#rfd_edit_filter_link');
       if (id) {
-        $a.attr('href', '/queries/' + id + '/edit').show();
+        $a.attr('href', rfdQueryEditUrl.replace('__RFD_ID__', id)).show();
       } else {
         $a.hide();
       }

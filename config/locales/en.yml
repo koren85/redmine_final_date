@@ -2,6 +2,8 @@
 en:
   label_check_settings: "Validate subtasks considering start date change?"
   label_check_subtask: "Validate all subtasks (yes) or only those with changed start date (no)"
+  label_parent_final_date: "Final date from the parent issue"
+  error_subtask_start_date_after_parent_final_date: "of the subtask (%{start_date}) cannot be later than the parent issue's final date (%{final_date})"
   label_auto_date_update_settings: "Automated Date Update"
   label_filter_id: "Issue filter (saved query)"
   label_date_mode: "Date calculation mode"

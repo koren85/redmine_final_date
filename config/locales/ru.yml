@@ -2,6 +2,8 @@
 ru:
   label_check_settings: "Проверка для подзадач с учетом смены даты начала?"
   label_check_subtask: "Проверять все подзадачи (да) или только у тех где менялась дата начала (нет)"
+  label_parent_final_date: "Итоговая дата из родительской задачи"
+  error_subtask_start_date_after_parent_final_date: "подзадачи (%{start_date}) не может быть больше Итоговой даты родительской задачи (%{final_date})"
   label_auto_date_update_settings: "Автоматическое обновление даты"
   label_filter_id: "Фильтр задач (сохранённый запрос)"
   label_date_mode: "Режим расчёта даты"
