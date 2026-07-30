@@ -86,12 +86,20 @@ The failure is reported with `errors.add`, which is sufficient to halt the save.
 
 **Dry-run unless `APPLY=1`.** Writes go straight to `custom_values`, deliberately bypassing `Issue#save`: no journal (hence no mail and no Telegram), none of the ~30 active custom workflows fire, and `updated_on` is left alone. A data repair is not an event.
 
-Two things it must keep doing:
+Three things it must keep doing:
 
+- **Skip closed subtasks** (`INCLUDE_CLOSED=1` to override). Closed issues are finished work; rewriting their dates is churn. On this data that is more than half the candidates — 502 changes instead of 1088.
 - **Skip subtasks whose tracker does not carry the field.** It applies to only 3 of 14 trackers here; writing a value elsewhere creates invisible orphan data.
 - **Skip branches whose top-level issue's tracker cannot hold the field.** There is no authoritative value for such a branch, so clearing its subtasks would be a guess rather than a repair.
 
 It is idempotent — a second run reports zero.
+
+### Closed issues: why SubtaskSync and DateUpdater treat a closed owner differently
+
+Deliberate asymmetry, do not "harmonise" it:
+
+- **SubtaskSync copies** the owner's existing date and never modifies the owner. An open subtask under a *closed* top-level issue is still synced — that makes the branch consistent, which is the entire point.
+- **DateUpdater changes** the owner's date. If the top-level issue is closed it is skipped, and therefore the whole branch must be skipped too: updating descendants while leaving the owner untouched would push them out of sync with the very issue they mirror.
 
 ### DateUpdater — not used in production
 

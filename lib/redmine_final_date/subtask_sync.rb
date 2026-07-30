@@ -18,13 +18,16 @@ module RedmineFinalDate
   # Dry-run unless apply: true.
   class SubtaskSync
     Result = Struct.new(:to_set, :to_clear, :skipped_subtask_tracker,
-                        :skipped_owner_tracker, :applied, keyword_init: true)
+                        :skipped_owner_tracker, :skipped_closed, :closed_owners,
+                        :applied, keyword_init: true)
 
     def initialize(settings = nil)
       @settings = settings || RedmineFinalDate::Settings.all
     end
 
-    def run(apply: false)
+    # include_closed: closed issues are finished work — rewriting their dates is
+    # churn nobody asked for, so they are left alone by default.
+    def run(apply: false, include_closed: false)
       cf_id = @settings['custom_field_id'].to_i
       raise 'custom_field_id is not configured' unless cf_id > 0
 
@@ -34,18 +37,23 @@ module RedmineFinalDate
       tracker_ids = field.trackers.pluck(:id).to_set
       log "Field ##{cf_id} #{field.name.inspect} applies to #{tracker_ids.size} tracker(s)"
 
-      values  = load_values(cf_id)   # issue_id => [row_id, raw value]
-      tracker = {}
-      parent  = {}
-      root    = {}
-      Issue.pluck(:id, :parent_id, :root_id, :tracker_id).each do |id, pid, rid, tid|
+      values     = load_values(cf_id)   # issue_id => [row_id, raw value]
+      closed_ids = IssueStatus.where(is_closed: true).pluck(:id).to_set
+      tracker    = {}
+      parent     = {}
+      root       = {}
+      closed     = {}
+      Issue.pluck(:id, :parent_id, :root_id, :tracker_id, :status_id).each do |id, pid, rid, tid, sid|
         parent[id]  = pid
         root[id]    = rid || id
         tracker[id] = tid
+        closed[id]  = closed_ids.include?(sid)
       end
+      log "Closed issues are #{include_closed ? 'INCLUDED' : 'skipped'}"
 
       result = Result.new(to_set: [], to_clear: [], skipped_subtask_tracker: 0,
-                          skipped_owner_tracker: 0, applied: 0)
+                          skipped_owner_tracker: 0, skipped_closed: 0,
+                          closed_owners: 0, applied: 0)
 
       parent.each do |id, pid|
         next if pid.nil?                       # top-level issues own their date
@@ -69,6 +77,14 @@ module RedmineFinalDate
         want = normalize(values[owner_id]&.last)
         have = normalize(values[id]&.last)
         next if want == have
+
+        # Counted only when it would otherwise have been a change, so the number
+        # reflects work skipped rather than issues merely looked at.
+        if closed[id] && !include_closed
+          result.skipped_closed += 1
+          next
+        end
+        result.closed_owners += 1 if closed[owner_id]
 
         row = { issue_id: id, owner_id: owner_id, row_id: values[id]&.first,
                 from: have, to: want }
@@ -97,8 +113,10 @@ module RedmineFinalDate
     def report(result)
       log "Subtasks to set to the owner's date : #{result.to_set.size}"
       log "Subtasks to clear (owner has none)  : #{result.to_clear.size}"
+      log "Skipped, subtask is closed           : #{result.skipped_closed}"
       log "Skipped, subtask tracker has no field: #{result.skipped_subtask_tracker}"
       log "Skipped, owner tracker has no field  : #{result.skipped_owner_tracker}"
+      log "  (of the planned changes, #{result.closed_owners} sit under a CLOSED top-level issue)" if result.closed_owners > 0
 
       (result.to_set + result.to_clear).first(10).each do |r|
         log "  ##{r[:issue_id]}: #{r[:from].inspect} -> #{r[:to].inspect} (owner ##{r[:owner_id]})"

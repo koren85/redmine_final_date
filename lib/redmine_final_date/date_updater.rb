@@ -134,6 +134,14 @@ module RedmineFinalDate
         return results[:skipped] += filter_issues.size
       end
 
+      # A closed top-level issue is finished work. Skip the WHOLE branch, not
+      # just the root: updating the descendants while leaving the owner alone
+      # would push them out of sync with the very issue they mirror.
+      if closed?(root)
+        log "Tree ##{root_id}: top-level issue is closed, skipping the whole branch."
+        return results[:skipped] += filter_issues.size
+      end
+
       # Make it visible when the filter matched subtasks rather than the owner:
       # the date belongs to the top-level issue, so that is what gets written.
       non_roots = filter_issues.reject { |i| i.parent_id.nil? }
@@ -149,6 +157,9 @@ module RedmineFinalDate
       # Descendants at every depth: silent — no journal, and therefore no mail
       # and no Telegram, since both fire on journal creation.
       root.descendants.each do |subtask|
+        # Closed subtasks are finished work — no point rewriting their dates.
+        next if closed?(subtask)
+
         add_to_plan(plan, subtask, acting_user, new_date, '',
                     "subtask of ##{root_id}", false)
       end
@@ -170,6 +181,14 @@ module RedmineFinalDate
 
     def comment_text
       @settings['comment_text'].to_s
+    end
+
+    def closed?(issue)
+      closed_status_ids.include?(issue.status_id)
+    end
+
+    def closed_status_ids
+      @closed_status_ids ||= IssueStatus.where(is_closed: true).pluck(:id).to_set
     end
 
     # ----------------------------------------------------------------
