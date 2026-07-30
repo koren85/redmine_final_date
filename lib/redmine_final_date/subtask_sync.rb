@@ -19,7 +19,7 @@ module RedmineFinalDate
   class SubtaskSync
     Result = Struct.new(:to_set, :to_clear, :skipped_subtask_tracker,
                         :skipped_owner_tracker, :skipped_closed, :closed_owners,
-                        :applied, keyword_init: true)
+                        :already_ok, :applied, keyword_init: true)
 
     def initialize(settings = nil)
       @settings = settings || RedmineFinalDate::Settings.all
@@ -53,13 +53,24 @@ module RedmineFinalDate
 
       result = Result.new(to_set: [], to_clear: [], skipped_subtask_tracker: 0,
                           skipped_owner_tracker: 0, skipped_closed: 0,
-                          closed_owners: 0, applied: 0)
+                          closed_owners: 0, already_ok: 0, applied: 0)
 
       parent.each do |id, pid|
         next if pid.nil?                       # top-level issues own their date
 
         owner_id = root[id]
         next if owner_id == id                 # defensive: malformed tree
+
+        want = normalize(values[owner_id]&.last)
+        have = normalize(values[id]&.last)
+
+        # Everything below counts only ACTUAL divergences, so that the buckets
+        # partition one set and add up. Each subtask lands in exactly one bucket,
+        # the first that matches.
+        if want == have
+          result.already_ok += 1
+          next
+        end
 
         # The owner cannot hold the field at all -> there is no authoritative
         # value for this branch. Leave it alone rather than clearing subtasks.
@@ -74,12 +85,6 @@ module RedmineFinalDate
           next
         end
 
-        want = normalize(values[owner_id]&.last)
-        have = normalize(values[id]&.last)
-        next if want == have
-
-        # Counted only when it would otherwise have been a change, so the number
-        # reflects work skipped rather than issues merely looked at.
         if closed[id] && !include_closed
           result.skipped_closed += 1
           next
@@ -111,12 +116,18 @@ module RedmineFinalDate
     end
 
     def report(result)
-      log "Subtasks to set to the owner's date : #{result.to_set.size}"
-      log "Subtasks to clear (owner has none)  : #{result.to_clear.size}"
-      log "Skipped, subtask is closed           : #{result.skipped_closed}"
-      log "Skipped, subtask tracker has no field: #{result.skipped_subtask_tracker}"
-      log "Skipped, owner tracker has no field  : #{result.skipped_owner_tracker}"
-      log "  (of the planned changes, #{result.closed_owners} sit under a CLOSED top-level issue)" if result.closed_owners > 0
+      diverged = result.to_set.size + result.to_clear.size + result.skipped_closed +
+                 result.skipped_subtask_tracker + result.skipped_owner_tracker
+
+      log "Subtasks already matching their owner: #{result.already_ok} (nothing to do)"
+      log "Subtasks whose date differs          : #{diverged}"
+      log "  -> will set to the owner's date    : #{result.to_set.size}"
+      log "  -> will clear (owner has none)     : #{result.to_clear.size}"
+      log "  -> skipped, subtask is closed      : #{result.skipped_closed}"
+      log "  -> skipped, subtask tracker has no field: #{result.skipped_subtask_tracker}"
+      log "  -> skipped, owner tracker has no field : #{result.skipped_owner_tracker}"
+      log "WILL CHANGE: #{result.to_set.size + result.to_clear.size} subtask(s)"
+      log "  (of those, #{result.closed_owners} sit under a CLOSED top-level issue)" if result.closed_owners > 0
 
       (result.to_set + result.to_clear).first(10).each do |r|
         log "  ##{r[:issue_id]}: #{r[:from].inspect} -> #{r[:to].inspect} (owner ##{r[:owner_id]})"
