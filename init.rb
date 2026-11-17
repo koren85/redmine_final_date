@@ -1,7 +1,7 @@
 Redmine::Plugin.register :redmine_final_date do
   name 'Redmine Final Date plugin'
   author 'Chernyaev A.A.'
-  description 'Отображение итоговой даты в подзадачах'
+  description 'Итоговая дата: одна на ветку задач, запрет работы при прошедшей дате'
   version '0.0.1'
   url ''
   author_url ''
@@ -16,7 +16,13 @@ Redmine::Plugin.register :redmine_final_date do
     'comment_text'         => '',
     'acting_user_id'       => '',
     'responsible_field_id' => '',
-    'cron_schedule'        => '0 16 * * 1-5'
+    'cron_schedule'        => '0 16 * * 1-5',
+    # Everything below is off until an admin switches it on.
+    'sync_subtasks'          => '0',
+    'overdue_guard'          => '0',
+    'overdue_block_subtasks' => '0',
+    'overdue_status_ids'     => [],
+    'staff_group_ids'        => []
   }
 
 end

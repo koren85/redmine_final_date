@@ -24,6 +24,66 @@
 </p>
 
 <%# ================================================================ %>
+<%# Subtasks mirror the owner's date                                 %>
+<%# ================================================================ %>
+
+<h3><%= l(:label_rfd_sync_section) %></h3>
+<p>
+  <%= hidden_field_tag 'settings[sync_subtasks]', '0', id: nil %>
+  <%= check_box_tag 'settings[sync_subtasks]', '1',
+        RedmineFinalDate::Settings.truthy?(settings['sync_subtasks']),
+        id: 'settings_sync_subtasks' %>
+  <label for="settings_sync_subtasks" style="float:none; margin-left:0; width:auto;"><%= l(:label_rfd_sync_subtasks) %></label>
+  <br><em class="info"><%= l(:hint_rfd_sync_subtasks) %></em>
+</p>
+
+<%# ================================================================ %>
+<%# A final date in the past                                         %>
+<%# ================================================================ %>
+
+<h3><%= l(:label_rfd_overdue_section) %></h3>
+<p>
+  <%= hidden_field_tag 'settings[overdue_guard]', '0', id: nil %>
+  <%= check_box_tag 'settings[overdue_guard]', '1',
+        RedmineFinalDate::Settings.truthy?(settings['overdue_guard']),
+        id: 'settings_overdue_guard' %>
+  <label for="settings_overdue_guard" style="float:none; margin-left:0; width:auto;"><%= l(:label_rfd_overdue_guard) %></label>
+  <br><em class="info"><%= l(:hint_rfd_overdue_guard) %></em>
+</p>
+
+<p>
+  <label for="settings_overdue_status_ids"><%= l(:label_rfd_overdue_status_ids) %>:</label><br/>
+  <%# The hidden blank lets the admin clear the list: an empty multi-select
+      posts nothing, and the key would keep its previous value. %>
+  <%= hidden_field_tag 'settings[overdue_status_ids][]', '', id: nil %>
+  <%= select_tag 'settings[overdue_status_ids][]',
+        options_from_collection_for_select(IssueStatus.sorted, 'id', 'name',
+                                           RedmineFinalDate::Settings.id_list(settings['overdue_status_ids'])),
+        multiple: true, size: 10, class: 'rfd-select2-wide',
+        id: 'settings_overdue_status_ids' %>
+</p>
+
+<p>
+  <label for="settings_staff_group_ids"><%= l(:label_rfd_staff_group_ids) %>:</label><br/>
+  <%= hidden_field_tag 'settings[staff_group_ids][]', '', id: nil %>
+  <%= select_tag 'settings[staff_group_ids][]',
+        options_from_collection_for_select(Group.givable.sorted, 'id', 'name',
+                                           RedmineFinalDate::Settings.id_list(settings['staff_group_ids'])),
+        multiple: true, size: 10, class: 'rfd-select2-wide',
+        id: 'settings_staff_group_ids' %>
+  <br><em class="info"><%= l(:hint_rfd_staff_group_ids) %></em>
+</p>
+
+<p>
+  <%= hidden_field_tag 'settings[overdue_block_subtasks]', '0', id: nil %>
+  <%= check_box_tag 'settings[overdue_block_subtasks]', '1',
+        RedmineFinalDate::Settings.truthy?(settings['overdue_block_subtasks']),
+        id: 'settings_overdue_block_subtasks' %>
+  <label for="settings_overdue_block_subtasks" style="float:none; margin-left:0; width:auto;"><%= l(:label_rfd_block_subtasks) %></label>
+  <br><em class="info"><%= l(:hint_rfd_block_subtasks) %></em>
+</p>
+
+<%# ================================================================ %>
 <%# Automated date update section                                    %>
 <%# ================================================================ %>
 
@@ -145,6 +205,7 @@
     // Initialise Select2 on all plugin dropdowns — plain selects if unavailable.
     if ($.fn.select2) {
       $('.rfd-select2').select2({ width: '300px' });
+      $('.rfd-select2-wide').select2({ width: '520px' });
     }
 
     // Show/hide date_days vs date_fixed based on selected mode

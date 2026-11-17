@@ -4,24 +4,30 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Plugin Overview
 
-`redmine_final_date` is a Redmine plugin built around one admin-configured date custom field — the "final date" (Итоговая дата). It does four independent things:
+`redmine_final_date` is a Redmine plugin built around one admin-configured date custom field — the "final date" (Итоговая дата). It does six things:
 
 1. **Displays** a parent issue's final date at the bottom of a subtask page, colour-coded red (past) or blue (future).
 2. **Hides** that custom field from subtask edit forms and show pages via injected JavaScript — the final date belongs to the parent, so subtasks must not edit it.
 3. **Validates** on update that a subtask's `start_date` does not exceed its parent's final date.
 4. **Bulk-updates** the final date on every issue matched by a saved `IssueQuery`, driven by a rake task meant to run from cron.
+5. **Keeps every subtask's final date equal to its top-level issue's** on each save (2026-10-11, setting `sync_subtasks`).
+6. **Refuses work on a branch whose final date has passed** (2026-10-11): an employee cannot save the top-level issue while it sits on an employee in a listed status (`overdue_guard`), nor create a subtask under it (`overdue_block_subtasks`).
+
+Items 5 and 6 are **off by default** — a deploy changes nothing until an admin switches them on in the plugin settings.
 
 The plugin has no migrations and no tables of its own — it reads and writes Redmine's existing `custom_values`.
 
 ## Running Tests
 
-There are currently no tests; `test/test_helper.rb` only delegates to Redmine's root helper. If you add any, they run from the **Redmine root**, not the plugin directory:
+`test/unit/final_date_rules_test.rb` covers items 5 and 6 above (the display hook, the JS and `DateUpdater` have no tests). Tests run from the **Redmine root**, and on this machine only through the shared test-database lock — several sessions share `redmine_test`:
 
 ```bash
 cd /Users/alexandr/RubymineProjects/redmine-4.1.3-1
-bundle exec rake redmine:plugins:test NAME=redmine_final_date
-bundle exec ruby -I test plugins/redmine_final_date/test/unit/some_test.rb -n test_method_name
+RBENV_VERSION=2.6.10 plugins/redmine_agent_work/tools/rtest --exec /opt/homebrew/Cellar/rbenv/1.3.2/libexec/rbenv exec \
+  bundle exec bin/rails test plugins/redmine_final_date/test/unit/final_date_rules_test.rb
 ```
+
+The tests build their own date field and stub `Setting.plugin_redmine_final_date`; issues are prepared with nobody logged in, so the rules under test do not get in the way of building the fixture.
 
 For quick manual verification against the dev database, `rails runner` is the practical tool:
 
@@ -39,7 +45,9 @@ Beware: **defining a top-level `def try(...)` in a runner script silently overri
 | `lib/redmine_final_date/settings.rb` | `RedmineFinalDate::Settings` — the single accessor for plugin settings; merges defaults, parses dates, resolves the custom field |
 | `lib/hooks.rb` | `RedmineFinalDate::Hooks` — loads the stylesheet and renders the parent's final date on the subtask show page |
 | `lib/IncludeJavascriptsHook.rb` | `RedmineFinalDate::IncludeJavascriptsHook` — injects JS that removes the custom field from subtask forms and show views |
-| `lib/redmine_final_date/models/custom_validation_patch.rb` | Patches `Issue` with the `check_subtask_start_date` validation |
+| `lib/redmine_final_date/models/custom_validation_patch.rb` | Patches `Issue`: the `check_subtask_start_date` validation, the two "date in the past" validations, and the before/after_save pair that keeps subtasks equal to the owner |
+| `lib/redmine_final_date/subtask_mirror.rb` | `RedmineFinalDate::SubtaskMirror.push_down` — writes a date onto every descendant, straight into `custom_values` |
+| `lib/redmine_final_date/subtask_sync.rb` | `RedmineFinalDate::SubtaskSync` — the one-off repair of branches that drifted before item 5 existed |
 | `lib/redmine_final_date/date_updater.rb` | `RedmineFinalDate::DateUpdater` — the bulk update engine |
 | `lib/tasks/update_final_dates.rake` | `redmine:final_date:update_dates` — cron entry point |
 | `app/views/redmine_final_date/_settings.html.erb` | Settings form (Redmine convention for plugin settings partials) |
@@ -105,7 +113,64 @@ Deliberate asymmetry, do not "harmonise" it:
 
 **The rake task is not scheduled on production and nobody uses it.** It was needed once and no longer is. It is kept working and maintained, but it is not load-bearing: roughly two thirds of the plugin's code, 8 of its 10 settings, and most of the settings form exist only for it. Only `custom_field_id` and `check_subtask` affect live behaviour.
 
-What is actually live: the display hook, the JS field hiding, the `start_date` validation — and custom workflow #33, which propagates the date down a branch when someone edits the top-level issue. Diagnose date-mismatch reports there first, not here.
+What is actually live: the display hook, the JS field hiding, the `start_date` validation — and custom workflow #33, which propagates the date down a branch when someone edits the top-level issue. Until `sync_subtasks` is switched on, diagnose date-mismatch reports there first, not here; once it is on, the plugin does the propagation itself (next section) and #33 is redundant.
+
+### Subtasks mirror the owner's date — the live mechanism (2026-10-11)
+
+Workflow #33 fires only when somebody edits the top-level issue, runs a full `child.save` (and therefore every custom workflow) on each descendant, and can refuse the owner's save when one descendant fails validation. It does nothing for a subtask created later, moved to another parent, or edited through bulk edit / the API. On production that left 2 266 subtasks out of step with their owner (1 357 of them open, 173 created in the last 30 days) — the mismatch people see in issue lists.
+
+With `sync_subtasks` on, the plugin holds the invariant itself, in `CustomValidationPatch`:
+
+- **`before_save :rfd_take_owner_final_date`** — any issue that has a parent leaves its save carrying the owner's date, whatever it was saved with. That covers creation, a later save of a subtask that drifted, a move to another parent, and any attempt to set the date on the subtask (inert: the owner's value wins). It reads the owner through `Settings.owner_after_save`, which resolves `parent_issue_id` — Redmine copies the parent chosen in the form into `parent_id` only in its own `before_save`, so `parent_id` is stale during validation and nil on a new record. **`Settings.owner_of` still reads `parent_id` and is left for the older `start_date` validation and the display hooks**: switching it changed that validation's verdict on a move even with every new setting off (acceptance review, 2026-10-11), and "off by default" has to mean "exactly as before".
+- **`after_save :rfd_push_final_date_down`** — when the date of an issue changed in this save, or the issue was moved, `SubtaskMirror.push_down` writes the owner's date onto all its descendants. For the owner itself the value comes from memory, not from the database: the owner's own `custom_values` row is written by another `after_save` (acts_as_customizable) and ordering must not matter.
+- **Writes to descendants are silent** — straight to `custom_values`, like `SubtaskSync`: no journal (hence no mail, no Telegram), no custom workflows, `updated_on` untouched. A subtask does not own this date; mirroring it is not an event in the subtask's life.
+- **The push runs inside its own savepoint** (`Issue.transaction(requires_new: true)`). A plain `rescue` is not enough: after a database error PostgreSQL refuses every further statement in the transaction, and the owner's own save would die with `PG::InFailedSqlTransaction`. With the savepoint only the mirroring is rolled back; the descendants catch up on their next save.
+- **Closed descendants are included** here, unlike in the one-off repair's default: once the owner's date moves, a closed subtask still showing the old one is exactly the visible mismatch.
+- **A branch whose owner's tracker cannot hold the field is left alone**, same as in `SubtaskSync` — there is no authoritative value to mirror.
+- A subtask whose own save heals a drifted value gets an ordinary journal detail for the field if that save has a journal. After the one-off repair this is rare; on a move to another parent it is meaningful.
+
+It coexists with workflow #33. On this installation #33 runs first (measured on the dev copy: custom workflows' `after_save` precedes the plugin's), saves as many descendants as it can through `child.save` — it stops at the first one that fails validation, which is one of the ways branches drifted — and the plugin then completes the rest silently.
+
+**Do not disable #33 before looking at workflow #17 "Синхронизация с иркутском"** (one project). #17 sends the final date to an external system from a `before_save`, and on subtasks it fires only because #33 saves them. The plugin's silent write does not go through `Issue#save`, so without #33 a date change would stop reaching that system for subtasks. **Decided 2026-10-13: subtasks do not need to be sent there** — so #33 goes off as part of the production rollout, once `sync_subtasks` is on; #17 keeps sending the top-level issue's own date.
+
+Two races the callbacks cannot close (reasoned, not reproduced): a subtask created while the owner's date change is still uncommitted reads the old date; a deadlock between the push and a concurrent subtask save rolls the push back. Both leave a subtask one step behind until its next save. A nightly `rake redmine:final_date:sync_subtasks APPLY=1 INCLUDE_CLOSED=1` is the cheap safety net.
+
+Rollout order: deploy → `rake redmine:final_date:sync_subtasks` (report) → the same with `APPLY=1 INCLUDE_CLOSED=1` → switch `sync_subtasks` on → disable workflow #33 → (optional) the nightly rake.
+
+### A final date in the past (2026-10-11)
+
+The owner's rule: a final date must not be earlier than today, otherwise the branch can neither be started nor put into a plan (subtask dates may not exceed it). Customers do not edit the field (it is read-only for their roles); employees do — 2 212 edits on top-level issues in 90 days on production — so the refusal lands on someone who can fix it.
+
+Three validations, all in `CustomValidationPatch`, all bound to **employees' own actions**:
+
+- **`rfd_check_overdue_final_date`** (`overdue_guard`) — a top-level issue whose final date is before today cannot be saved when, *after the save*, its status is in `overdue_status_ids` **and** its assignee is an employee (a user in `staff_group_ids`, or one of those groups itself — list the department queue groups there too). Judged by what is being saved, so the very save that moves the date to today or later, **clears the date**, hands the issue to the customer, leaves it unassigned or takes it out of the listed statuses goes through. Clearing must stay possible — that was an explicit decision, do not "close the loophole".
+- **`rfd_check_subtask_under_overdue_owner`** (`overdue_block_subtasks`) — no new subtask at any depth under such an issue, whatever the owner's status, and no moving an existing issue into the branch from outside (the same thing done in two steps). Existing subtasks are not affected, and a subtask may be moved around inside its own branch.
+- **`rfd_check_overdue_date_stays_in_force`** (active when either rule above is on) — a date that has passed stops applying only when someone moves or clears it, never as a side effect. An issue that owns such a date cannot be put under a parent (with `sync_subtasks` on it would silently take the new owner's date; either way it would stop being judged as an owner) nor switched to a tracker or project that does not carry the field (the stored row would stay behind, out of sight). Refused whatever the status and the assignee; the same save may move or clear the date and then goes through. Added after the acceptance review showed both moves were a way around the first two rules.
+
+What is deliberately **not** closed: moving a top-level issue whose date is *fine* under another parent changes its date to the new owner's without asking anyone for a reason — the change is recorded in the history as automatic. If that ever matters, it is a decision for the owner, not a bug to fix quietly.
+
+Who is bound (`Settings.staff_actor?`): a logged-in user who is in `staff_group_ids`. Not bound: **administrators — never, even as members of those groups (the owner's decision, 2026-10-12: "an administrator is not an employee")**; customers; saves with nobody logged in (rake, background threads); the scenario engine and the dispatcher, recognised by their thread flags `:pb_scenario_execution` and `:nd_dispatcher_execution` — read as plain thread keys so this plugin depends on neither. Automation may therefore leave an overdue issue on an employee; the first employee to touch it is the one who has to deal with the date. Process buttons and wizard cascades are an employee's actions and are bound.
+
+**Until `staff_group_ids` is filled in, neither rule applies to anyone** — "who is an employee" is the admin's call, not a default.
+
+The reason for moving or setting the date is not this plugin's business: `redmine_master_forms` asks for it ("История полей задачи", field `cf_<id>` with «причина обязательна» and «и при постановке значения»).
+
+Every new callback and validation rescues `StandardError` and logs: a failure here must never break an issue save.
+
+Things to know before switching the rules on in production:
+
+- **Automation that runs as a logged-in employee and sets no thread flag counts as that employee.** A REST integration using an employee's key is bound — right for a person, wrong for a robot; run robots under an administrator's account or with nobody logged in. `redmine_auto_closer` works as the first active administrator and is therefore not bound. Keep closing and waiting statuses out of `overdue_status_ids` all the same.
+- **Process buttons can end half-done.** Cascades are non-fatal by design: a button on a subtask of an overdue branch changes that subtask, while its cascaded subtask is not created (a warning is shown); a cascade onto the overdue owner is skipped together with its comment. Copying an issue with subtasks into an overdue branch copies the issue without them.
+- **Scale.** On the dev copy 1 203 open top-level issues have a date in the past (993 with subtasks); on production 408 are in working statuses, 360 of them waiting for the customer. The status list decides how many employees meet the refusal on day one.
+
+Known limits, left as they are on purpose (second round of the acceptance review, 2026-10-11 — accepted with these noted):
+
+- **Detaching a subtask from an overdue branch dead-ends in the form.** Once detached it is a top-level issue carrying the past date, the guard refuses it, and the subtask form has no date field to fix (the JS hides it). Fix the owner's date first, or change status/assignee in the same save. Two such detachments a year on the dev copy.
+- **Moving an existing subtask out of an overdue branch is not refused.** Under a healthy issue it takes that owner's date and new subtasks can be created below it. The owner itself stays under the rules.
+- **A tracker switched to one without the field before the date passes** keeps its stored row; once the date passes nothing judges the issue until it comes back to a tracker with the field — then the guard applies at once.
+- `rfd_check_overdue_date_stays_in_force` does not look at status or assignee, so it also covers closed issues. A tracker or project change cannot be combined with clearing the date in one save (the field is already gone from the issue being saved): clear first, then change.
+
+Tests cover the model. The same validations serve bulk edit, REST and the customer's form; those paths were exercised by the reviewer's probes only.
 
 ### DateUpdater
 
